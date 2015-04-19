@@ -43,21 +43,31 @@ var BotFactory,
 			API Keys configurations.
 		*/
 		keys: {
-			
+
 		},
-		
+
+		options: {
+
+		},
+
 		/*
 			Looping schedule.
 		*/
 		schedule: {
+			tolerance: 1, //Tolerance in minutes.
 
 			//Array of task names. Should be available in BotFactory's TASK_DEFINITIONS.
-			tasks: ['helloWorld'],
+			tasks: ['helloWorld', 'sendText'],
 
 			//Configuration for each task, keyed by name.
 			config: {
 				helloWorld: {
-					minutes: 60 //Execute every 60 minutes.		
+					args: [], //Custom args to provide.
+					minutes: 60 //Execute every 60 minutes.
+				},
+				sendText: {
+					args: ["This is a schedule message."],
+					minutes: 5
 				}
 			}
 
@@ -90,6 +100,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 		//Command
 		BotCommand,
+		BotScheduler,
 		GroupMeBot;
 
 	//MARK: GroupMe Messages
@@ -290,6 +301,27 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 		isCommand: function () {
 			return this.getCommand() !== null;
+		},
+
+		/*
+			Returns an object containing all sender-related data.
+		*/
+		getSender: function () {
+			var senderData = {
+				name: this.data.name,
+				id: this.data.sender_id,
+				type: this.data.sender_type
+			};
+
+			return senderData;
+		},
+
+		senderIsNotBot: function () {
+			return this.getSender.type !== 'bot';
+		},
+
+		senderIsNotThisBot: function () {
+			return this.getSender.id !== APP_CONFIG.bot.id;
 		}
 
 		//TODO: Add any helper functions. (hasAttachments, etc.)
@@ -333,6 +365,115 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			}
 
 			this.args = args;
+		}
+
+	};
+
+	//MARK: Bot Scheduler
+	/*
+		Utility class for running scheduled tasks on a bot.
+	*/
+	BotScheduler = function (bot) {
+		this.init(bot);
+	};
+
+	BotScheduler.prototype = {
+
+		init: function (bot) {
+			this.bot = bot;
+			this.time = this.initTime();
+		},
+
+		initTime: function () {
+			var date = new Date(),
+				minutes = date.minutes,
+				time = {
+					date: date,
+					minutes: minutes,
+					timeBlockCache: {},
+					computeTimeBlock: function (interval) {
+
+						/*
+						3600 minutes in a day
+						current minutes: 30
+						
+						run every 15 minutes
+						
+						take the floor of 30/interval.
+						
+						*/
+
+					},
+					getTimeBlock: function (interval) {
+						if (this.timeBlockCache[interval]) {
+							this.timeBlockCache[interval] = this.computeTimeBlock();
+						}
+						return this.timeBlockCache[interval];
+					},
+					withinTimeBlock: function (interval) {
+						//TODO: Check whether the interval is within the time block.
+						return true;
+					}
+				};
+
+			return time;
+		},
+
+		//MARK: Run Tasks
+		runScheduledTasks: function () {
+			var scheduler = this,
+				schedule = this.bot.config.schedule,
+				scheduledTasks = schedule.tasks,
+				task,
+				filteredTasks = [];
+
+			scheduledTasks.forEach(function (taskName) {
+				task = schedule.config[taskName];
+
+				if (task === undefined) {
+					throw 'No task named "' + taskName + '" was configured in the schedule.';
+				}
+
+				if (scheduler.shouldRunTask(task)) {
+					filteredTasks.push(taskName);
+				}
+			});
+
+			this.runScheduleTasksWithNames(filteredTasks);
+		},
+
+		runAllTasks: function () {
+			var tasks = this.bot.config.schedule.tasks;
+			this.runScheduleTasksWithNames(tasks);
+		},
+
+		runScheduleTasksWithNames: function (taskNames) {
+			var args,
+				bot = this.bot,
+				scheduledTasksConfigs = this.bot.config.schedule.config,
+				config;
+
+			taskNames.forEach(function (task) {
+				config = scheduledTasksConfigs[task];
+
+				if (config) {
+					args = config.args || [];
+				}
+
+				bot.runTask(task, args);
+			});
+		},
+
+		/*
+			Compares the minutes to the current time.
+		*/
+		shouldRunTask: function (taskConfig) {
+			var minutes = taskConfig.minutes;
+			return this.isTimeToRun(minutes);
+		},
+
+		isTimeToRun: function (minutes) {
+			return this.time.withinTimeBlock(minutes);
 		}
 
 	};
@@ -381,7 +522,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		},
 
 		useDecodedMessage: function (decodedMessage) {
-			if (decodedMessage.isCommand()) {
+			if (decodedMessage.senderIsNotBot() && decodedMessage.isCommand()) {
 				var command = decodedMessage.getCommand();
 				this.runTaskWithCommand(command);
 			}
@@ -392,13 +533,8 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		The bot runs all its tasks.
 		*/
 		runScheduleTasks: function () {
-			var registeredTaskNames = this.config.tasks,
-				filteredTasks = [];
-
-			//TODO: Loop through scheul and filter those that should be run, then loop through them.
-
-			//TODO: For each task in filteredTasks, run it.
-
+			var scheduler = new BotScheduler(this);
+			scheduler.runScheduledTasks();
 		},
 
 		//MARK: Running Tasks
@@ -508,6 +644,13 @@ BotTasks = (function () {
 		}
 	};
 
+	tasks.sendText = {
+		run: function (bot, args) {
+			var text = args[0];
+			bot.sendText(text);
+		}
+	};
+
 	return tasks;
 }());
 
@@ -534,6 +677,15 @@ function doPost(event) {
 	}
 }
 
+function runScheduledTasks() {
+	'use strict';
+
+	var botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
+		bot = botFactory.makeBot();
+
+	bot.runScheduleTasks();
+}
+
 /*
 Hello world function for testing the bot is alive.
 */
@@ -541,8 +693,7 @@ function gsHelloWorld() {
 	'use strict';
 
 	var botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
-		bot = botFactory.makeBot(),
-		json;
+		bot = botFactory.makeBot();
 
 	bot.runTask('helloWorld');
 }
