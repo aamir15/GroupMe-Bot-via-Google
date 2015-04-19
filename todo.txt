@@ -1,0 +1,8 @@
+=== BotScheduler Should Run
+- Need to complete the function to determine whether or not the task should be run.
+-- Line 475
+-- isTimeToRun
+=== API Implementations
+- Add additional API tasks.
+- API Keys go into BOT_CONFIG.keys
+-- line 45
