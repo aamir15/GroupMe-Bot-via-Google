@@ -4,7 +4,7 @@ TODO: Readme stuff.
 
 Replace BOT_ID with the bot identifier.
 */
-var BOT_ID = ""; //REPLACE WITH YOUR BOT'S ID.
+var BOT_ID = ''; //REPLACE WITH YOUR BOT'S ID.
 
 var BotFactory,
 	BotTasks,
@@ -59,6 +59,19 @@ var BotFactory,
 
 BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 	'use strict';
+
+	//MARK: Factory validation.
+	if (!APP_CONFIG.bot.id || APP_CONFIG.bot.id.length === 0) {
+		throw 'Invalid configuration. No Bot Identifier was specified.';
+	}
+
+	if (!BOT_CONFIG) {
+		BOT_CONFIG = {};
+	}
+
+	if (!TASK_DEFINITIONS) {
+		throw 'Invalid configuration. Task definitions cannot be null.';
+	}
 
 	//MARK: "Classes"
 	var //Messages
@@ -383,18 +396,20 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 		//MARK: Running Tasks
 		runTaskWithCommand: function (command) {
-			var task = TASK_DEFINITIONS[command.name],
+			var name = command.name,
 				args = command.args;
 
-			if (task !== null) {
-				this.runTask(task, args);
-			} else {
-				this.sendError('No Task Available', 'No task was available with the name "' + command.name + '."');
-			}
+			this.runTask(name, args);
 		},
 
-		runTask: function (task, args) {
-			task.run(this, args);
+		runTask: function (name, args) {
+			var task = TASK_DEFINITIONS[name];
+
+			if (task !== null) {
+				task.run(this, args);
+			} else {
+				this.sendError('No Task Available', 'No task was available with the name "' + name + '."');
+			}
 		},
 
 		//MARK: Responses
@@ -442,15 +457,20 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 /**
 Object contains all tasks available to a bot.
+
+Tasks are defined as objects instead of functions to allow future extension of tasks.
 */
-var BotTasks = (function () {
+BotTasks = (function () {
 	'use strict';
 
-	//MARK: Private Functions
+	var tasks = {},
+		internal = {};
+
+	//MARK: Internal Functions
 	/*
 		This function will not be available to the bot.
 	*/
-	var privateHelloWorld = function () {
+	internal.helloWorld = function () {
 		return 'Hello World';
 	};
 
@@ -458,13 +478,22 @@ var BotTasks = (function () {
 	/*
 		This is the task available to the bot as "helloWorld".
 	*/
-	this.helloWorld = {
+	tasks.helloWorld = {
+		//"Static" Variable available to this task through 'this' reserved word.
+		text: 'Hello World',
+		
+		//Function that is actually called. Recieves a GroupMeBot instance, and an array of string arguments.
 		run: function (bot, args) {
-			var text = privateHelloWorld();
+			var text = 'Hello World';
+			
+			text = this.text;				//Usage of variable in tasks.helloWorld
+			text = internal.helloWorld();	//Usage of internal function.
+         
 			bot.sendText(text);
 		}
 	};
 
+	return tasks;
 }());
 
 /**
@@ -486,6 +515,19 @@ function doPost(event) {
 		//TODO (Minor): If GroupMe sent the message then run bot as command, else...
 		bot.runWithMessage(json);
 	}
+}
+
+/*
+Hello world function for testing the bot is alive.
+*/
+function gsHelloWorld() {
+	'use strict';
+
+	var botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
+		bot = botFactory.makeBot(),
+		json;
+
+	bot.runTask('helloWorld');
 }
 
 //TODO: Add function call for google scripts for running scheduled tasks.
