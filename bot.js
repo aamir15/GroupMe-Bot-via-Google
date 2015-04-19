@@ -2,7 +2,7 @@
 /*
 TODO: Readme stuff.
 
-Replace BOT_ID with the bot identifier.
+Replace BOT_ID with the bot identifier. Make an ID at https://dev.groupme.com/bots.
 */
 var BOT_ID = ''; //REPLACE WITH YOUR BOT'S ID.
 
@@ -39,6 +39,13 @@ var BotFactory,
 	Channel Bot Configuration
 	*/
 	BOT_CONFIG = {
+		/*
+			API Keys configurations.
+		*/
+		keys: {
+			
+		},
+		
 		/*
 			Looping schedule.
 		*/
@@ -480,16 +487,24 @@ BotTasks = (function () {
 	*/
 	tasks.helloWorld = {
 		//"Static" Variable available to this task through 'this' reserved word.
+		simple: true,
 		text: 'Hello World',
-		
+
 		//Function that is actually called. Recieves a GroupMeBot instance, and an array of string arguments.
 		run: function (bot, args) {
-			var text = 'Hello World';
-			
-			text = this.text;				//Usage of variable in tasks.helloWorld
-			text = internal.helloWorld();	//Usage of internal function.
-         
-			bot.sendText(text);
+			var text = 'Hello World',
+				message;
+
+			if (this.simple) {
+				text = this.text; //Usage of variable in tasks.helloWorld
+				text = internal.helloWorld(); //Usage of internal function.
+
+				bot.sendText(text);
+			} else {
+				message = bot.makeMessage();
+				message.text = text;
+				message.send();
+			}
 		}
 	};
 
@@ -514,6 +529,8 @@ function doPost(event) {
 
 		//TODO (Minor): If GroupMe sent the message then run bot as command, else...
 		bot.runWithMessage(json);
+	} else {
+		throw 'Invalid POST. No data was available.';
 	}
 }
 
