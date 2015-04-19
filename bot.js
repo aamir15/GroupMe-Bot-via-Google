@@ -1,4 +1,4 @@
-/*global UrlFetchApp:true*/
+/*global UrlFetchApp:true, console:true*/
 /*
 TODO: Readme stuff.
 
@@ -16,6 +16,11 @@ var BotFactory,
 		bot: {
 			id: BOT_ID,
 			name: ''
+		},
+
+		command: {
+			key: '!', //!command
+			argsSplit: ' ' //Split at spaces for args
 		},
 
 		messages: {
@@ -57,14 +62,10 @@ var BotFactory,
 			tolerance: 1, //Tolerance in minutes.
 
 			//Array of task names. Should be available in BotFactory's TASK_DEFINITIONS.
-			tasks: ['helloWorld', 'sendText'],
+			tasks: ['sendText'],
 
 			//Configuration for each task, keyed by name.
 			config: {
-				helloWorld: {
-					args: [], //Custom args to provide.
-					minutes: 60 //Execute every 60 minutes.
-				},
 				sendText: {
 					args: ["This is a schedule message."],
 					minutes: 5
@@ -279,11 +280,22 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		*/
 		parseCommand: function () {
 			var text = this.data.text,
-				isCommand = false, //TODO: Use regex or just see if it follow the pattern. See below.
-				command = null;
+				regex = new RegExp('^' + APP_CONFIG.command.key + '(\\S+)', ['i']),
+				isCommand = text.match(regex),
+				split,
+				command = null,
+				name,
+				args;
 
 			if (isCommand) {
-				//TODO: Attempts to parse the text for a command. Use regex to see if it might be, and then split the string accordingly, and make a BotCommand instance.
+				split = text.split(APP_CONFIG.command.argsSplit);
+				name = split[0].substring(1);
+
+				if (split.length > 1) {
+					args = split.slice(1);
+				}
+
+				command = new BotCommand(name, args);
 			}
 
 			return command;
@@ -390,29 +402,21 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 				time = {
 					date: date,
 					minutes: minutes,
-					timeBlockCache: {},
-					computeTimeBlock: function (interval) {
-
-						/*
-						3600 minutes in a day
-						current minutes: 30
-						
-						run every 15 minutes
-						
-						take the floor of 30/interval.
-						
-						*/
-
+					timeBlockCache: {
+						1: true //Always execute 1 minute intervals.
 					},
-					getTimeBlock: function (interval) {
-						if (this.timeBlockCache[interval]) {
-							this.timeBlockCache[interval] = this.computeTimeBlock();
-						}
-						return this.timeBlockCache[interval];
+					computeTimeBlock: function (interval) {
+						var time = this.minutes,
+							check = time % interval,
+							isWithin = ((time / check) === 0);
+						return isWithin;
 					},
 					withinTimeBlock: function (interval) {
-						//TODO: Check whether the interval is within the time block.
-						return true;
+						if (this.timeBlockCache[interval]) {
+							this.timeBlockCache[interval] = this.computeTimeBlock(interval);
+						}
+
+						return this.timeBlockCache[interval];
 					}
 				};
 
@@ -521,7 +525,32 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			this.useDecodedMessage(message);
 		},
 
+		runWithText: function (text) {
+			var data = {
+					'attachments': [],
+					'created_at': new Date().getTime(),
+					'id': 'System',
+					'name': 'System',
+					'sender_id': 'internal',
+					'sender_type': 'internal',
+					'system': true,
+					'text': text,
+					'user_id': null
+				},
+				decoded = new GroupMeDecodedMessage(data);
+
+			return this.useDecodedMessage(decoded);
+		},
+
 		useDecodedMessage: function (decodedMessage) {
+
+			//DEBUG
+			if (decodedMessage.senderIsNotBot()) {
+				this.sendText('Recieved Message - C: ' + JSON.stringify(decodedMessage.getCommand()));
+			} else {
+				this.sendText('The sender is a bot.');
+			}
+
 			if (decodedMessage.senderIsNotBot() && decodedMessage.isCommand()) {
 				var command = decodedMessage.getCommand();
 				this.runTaskWithCommand(command);
@@ -548,7 +577,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		runTask: function (name, args) {
 			var task = TASK_DEFINITIONS[name];
 
-			if (task !== null) {
+			if (task) {
 				task.run(this, args);
 			} else {
 				this.sendError('No Task Available', 'No task was available with the name "' + name + '."');
@@ -651,6 +680,13 @@ BotTasks = (function () {
 		}
 	};
 
+	tasks.log = {
+		run: function (bot, args) {
+			var text = JSON.stringify(args);
+			bot.log("Logging Text: " + text);
+		}
+	};
+
 	return tasks;
 }());
 
@@ -665,16 +701,34 @@ function doPost(event) {
 
 	var botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
 		bot = botFactory.makeBot(),
+		postData,
 		json;
 
 	if (event) {
-		json = JSON.parse(event.postData.getDataAsString());
-
-		//TODO (Minor): If GroupMe sent the message then run bot as command, else...
+		postData = event.postData;
+		
+		if (!postData) {
+			console.log("Invalid Post. Contained no data.");
+			throw 'Invalid POST. No data was available.';
+		} else {
+			console.log("Recieved Message: " + event.postData.getDataAsString());
+		}
+		
+		json = JSON.parse(postData.getDataAsString());
 		bot.runWithMessage(json);
 	} else {
-		throw 'Invalid POST. No data was available.';
+		throw 'Invalid POST. No event was available.';
 	}
+}
+
+function runDebugText() {
+	'use strict';
+
+	var text = APP_CONFIG.command.key + 'aTestCommand a b c d e f',
+		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
+		bot = botFactory.makeBot();
+
+	bot.runWithText(text);
 }
 
 function runScheduledTasks() {
