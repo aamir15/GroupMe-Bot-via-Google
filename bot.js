@@ -583,7 +583,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			if (task) {
 				task.run(this, args);
 			} else {
-				this.sendError('No Task Available', 'No task was available with the name "' + name + '."');
+				this.sendError('No Task Available', 'No task was available with the name "' + name + '".');
 			}
 		},
 
