@@ -1,10 +1,17 @@
-/*global UrlFetchApp:true, console:true*/
+/*global UrlFetchApp:true, Logger:true, console:true*/
 /*
 TODO: Readme stuff.
 
 Replace BOT_ID with the bot identifier. Make an ID at https://dev.groupme.com/bots.
 */
-var BOT_ID = ''; //REPLACE WITH YOUR BOT'S ID.
+var BOT_ID = '', //REPLACE WITH YOUR BOT'S ID.
+	botDebug = {
+		debug: true,
+		log: function (text) {
+			'use strict';
+			Logger.log(text);
+		}
+	};
 
 var BotFactory,
 	BotTasks,
@@ -502,18 +509,22 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 	.messaging.sender	(GroupMeMessageSender)
 	.messaging.decoder	(GroupMeMessageDecoder)
 	*/
-	GroupMeBot = function (config) {
-		this.init(config);
+	GroupMeBot = function (config, extra) {
+		this.init(config, extra);
 	};
 
 	GroupMeBot.prototype = {
 
-		init: function (config) {
+		init: function (config, extra) {
 			this.config = config;
 			this.messaging = {
 				sender: new GroupMeMessageSender(),
 				decoder: new GroupMeMessageDecoder()
 			};
+
+			if (extra) {
+				this.isServer = extra.server;
+			}
 		},
 
 		//MARK: Messages
@@ -543,14 +554,6 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		},
 
 		useDecodedMessage: function (decodedMessage) {
-
-			//DEBUG
-			if (decodedMessage.senderIsNotBot()) {
-				this.sendText('Recieved Message - C: ' + JSON.stringify(decodedMessage.getCommand()));
-			} else {
-				this.sendText('The sender is a bot.');
-			}
-
 			if (decodedMessage.senderIsNotBot() && decodedMessage.isCommand()) {
 				var command = decodedMessage.getCommand();
 				this.runTaskWithCommand(command);
@@ -605,15 +608,20 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			Convenience function for sending error messages.
 		*/
 		sendError: function (type, message) {
-			//TODO: Send an error.
-			this.sendText('Error: ' + type + ' - ' + message);
+			var text = 'Error: ' + type + ' - ' + message;
+
+			if (!this.isServer) {
+				this.sendText(text);
+			} else {
+				botDebug.log(text);
+			}
 		}
 
 	};
 
 	//MARK: Bot
-	this.makeBot = function () {
-		return new GroupMeBot(BOT_CONFIG);
+	this.makeBot = function (otherConfig) {
+		return new GroupMeBot(BOT_CONFIG, otherConfig);
 	};
 
 	//MARK: Convenience
@@ -683,7 +691,7 @@ BotTasks = (function () {
 	tasks.log = {
 		run: function (bot, args) {
 			var text = JSON.stringify(args);
-			bot.log("Logging Text: " + text);
+			botDebug.log("Logging Text: " + text);
 		}
 	};
 
@@ -706,15 +714,15 @@ function doPost(event) {
 
 	if (event) {
 		postData = event.postData;
-		
+
 		if (!postData) {
-			console.log("Invalid Post. Contained no data.");
+			botDebug.log("Invalid Post. Contained no data.");
 			throw 'Invalid POST. No data was available.';
 		} else {
-			console.log("Recieved Message: " + event.postData.getDataAsString());
+			botDebug.log("Recieved Message: " + event.postData.getDataAsString());
 		}
-		
-		json = JSON.parse(postData.getDataAsString());
+
+		json = postData.getDataAsString();
 		bot.runWithMessage(json);
 	} else {
 		throw 'Invalid POST. No event was available.';
@@ -726,7 +734,9 @@ function runDebugText() {
 
 	var text = APP_CONFIG.command.key + 'aTestCommand a b c d e f',
 		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
-		bot = botFactory.makeBot();
+		bot = botFactory.makeBot({
+			server: true
+		});
 
 	bot.runWithText(text);
 }
@@ -735,7 +745,9 @@ function runScheduledTasks() {
 	'use strict';
 
 	var botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
-		bot = botFactory.makeBot();
+		bot = botFactory.makeBot({
+			server: true
+		});
 
 	bot.runScheduleTasks();
 }
