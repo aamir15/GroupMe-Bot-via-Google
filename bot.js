@@ -1,4 +1,4 @@
-/*global UrlFetchApp:true, Logger:true, console:true*/
+/*global UrlFetchApp:true, LanguageApp:true, Logger:true, console:true*/
 /*
 TODO: Readme stuff.
 
@@ -55,7 +55,7 @@ var BotFactory,
 			API Keys configurations.
 		*/
 		keys: {
-
+			googleApps: ''
 		},
 
 		options: {
@@ -583,7 +583,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			if (task) {
 				task.run(this, args);
 			} else {
-				this.sendError('No Task Available', 'No task was available with the name "' + name + '".');
+				this.sendError('No Task Available', 'No task was available with the name "' + name + '."');
 			}
 		},
 
@@ -654,6 +654,39 @@ BotTasks = (function () {
 		return 'Hello World';
 	};
 
+	internal.args = {
+		concatFrom: function (args, splitter, start) {
+			return this.concat(args, splitter, start);
+		},
+
+		concatTo: function (args, splitter, end) {
+			return this.concat(args, splitter, undefined, end);
+		},
+
+		concat: function (args, splitter, start, end) {
+			if (!splitter) {
+				splitter = APP_CONFIG.command.argsSplit;
+			}
+
+			if (!start) {
+				start = 0;
+			}
+
+			if (end === undefined) {
+				end = args.length;
+			}
+
+			var text = "",
+				i;
+
+			for (i = start; i < end; i += 1) {
+				text += args[i] + " ";
+			}
+
+			return text;
+		}
+	};
+
 	//MARK: Public Functions
 	/*
 		This is the task available to the bot as "helloWorld".
@@ -678,6 +711,44 @@ BotTasks = (function () {
 				message.text = text;
 				message.send();
 			}
+		}
+	};
+
+	tasks.translate = {
+		run: function (bot, args) {
+			var sourceLanguage = args[0],
+				targetLanguage = args[1],
+				text = internal.args.concat(args, ' ', 2),
+				result = LanguageApp.translate(text, sourceLanguage, targetLanguage),
+				message = bot.makeMessage();
+
+			message.text = result;
+			message.send();
+		}
+	};
+
+	tasks.find = {
+		run: function (bot, args) {
+			var queryRoot = "https://maps.googleapis.com/maps/api/place/textsearch/json?",
+				argQuery = "query=",
+				argKey = "&key=" + BOT_CONFIG.keys.googleApps,
+				query = internal.args.concat(args, '+'),
+				request = queryRoot + argQuery + query + argKey,
+				json = UrlFetchApp.fetch(request),
+				parsed = JSON.parse(json),
+				results = parsed.results,
+				result,
+				message = bot.makeMessage();
+
+
+			if (results.length > 0) {
+				result = results[0].name + " near " + parsed.results[0].vicinity;
+			} else {
+				result = 'Nothing found.';
+			}
+
+			message.text = result;
+			message.send();
 		}
 	};
 
@@ -732,7 +803,7 @@ function doPost(event) {
 function runDebugText() {
 	'use strict';
 
-	var text = APP_CONFIG.command.key + 'aTestCommand a b c d e f',
+	var text = APP_CONFIG.command.key + 'find doctor in 77840',
 		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
 		bot = botFactory.makeBot({
 			server: true
