@@ -239,7 +239,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		sendMessage: function (message) {
 			var options = {
 				method: 'post',
-				payload: this.getMessagePayload(message)
+				payload: JSON.stringify(this.getMessagePayload(message))
 			};
 
 			UrlFetchApp.fetch(APP_CONFIG.messages.send.url, options);
@@ -722,6 +722,11 @@ BotTasks = (function () {
 				
 				map = attachmentFactory.makeLocation(96.0, -36.0, 'Hello World');
 				attachments.push(map);
+				
+				/*
+                image = attachmentFactory.makeImage(url);
+				attachments.push(image);
+                */
 				
 				message.text = text;
 				message.attachments = attachments;
