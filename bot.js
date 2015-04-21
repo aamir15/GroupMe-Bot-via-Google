@@ -688,7 +688,7 @@ BotTasks = (function () {
 					}
 				}
 
-				text += args[i];
+				text += args[end - 1];
 			}
 
 			return text;
