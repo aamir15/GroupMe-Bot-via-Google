@@ -31,6 +31,9 @@ var BotFactory,
 		},
 
 		messages: {
+			limits: {
+				text: 1000 //1000 character limit.	
+			},
 			keygen: {
 				multiplier: 1000000,
 				make: function () {
@@ -55,11 +58,14 @@ var BotFactory,
 			API Keys configurations.
 		*/
 		keys: {
-			googleApps: ''
+			googleMaps: '',
+			youtube: ''
 		},
 
 		options: {
-
+			youtube: {
+				safeSearch: 'moderate' //Moderate, Strict, None	
+			}
 		},
 
 		/*
@@ -141,6 +147,14 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			var payload = {
 				text: this.text
 			};
+
+			if (!payload.text) {
+				payload.text = '';
+			}
+
+			if (payload.text.length > APP_CONFIG.messages.limits.text) {
+				payload.text = payload.text.substr(0, APP_CONFIG.messages.limits.text - 3) + '...';
+			}
 
 			if (this.attachments) {
 				payload.attachments = this.attachments;
@@ -665,6 +679,14 @@ BotTasks = (function () {
 		},
 
 		concat: function (args, splitter, start, end) {
+			var getValue = function (element) {
+				return element;
+			};
+
+			return this.concatElements(args, getValue, splitter, start, end);
+		},
+
+		concatElements: function (elements, getValue, splitter, start, end) {
 			if (!splitter) {
 				splitter = APP_CONFIG.command.argsSplit;
 			}
@@ -674,21 +696,22 @@ BotTasks = (function () {
 			}
 
 			if (end === undefined) {
-				end = args.length;
+				end = elements.length;
 			}
 
 			var text = "",
 				count = end - start,
+				value,
 				i;
 
 			if (count > 0) {
 				if (count > 1) {
 					for (i = start; i < (end - 1); i += 1) {
-						text += args[i] + splitter;
+						text += getValue(elements[i], i) + splitter;
 					}
 				}
 
-				text += args[end - 1];
+				text += getValue(elements[end - 1], end);
 			}
 
 			return text;
@@ -719,19 +742,72 @@ BotTasks = (function () {
 				bot.sendText(text);
 			} else {
 				message = bot.makeMessage();
-				
+
 				map = attachmentFactory.makeLocation(96.0, -36.0, 'Hello World');
 				attachments.push(map);
-				
+
 				/*
                 image = attachmentFactory.makeImage(url);
 				attachments.push(image);
                 */
-				
+
 				message.text = text;
 				message.attachments = attachments;
 				message.send();
 			}
+		}
+	};
+
+	tasks.video = {
+		baseVideoUrl: 'https://www.youtube.com/watch?v=',
+		baseQueryUrl: 'https://www.googleapis.com/youtube/v3/search?part=id&type=video&key=',
+		urlForVideo: function (id) {
+			return this.baseVideoUrl + id;
+		},
+		searchVideos: function (query) {
+			var key = BOT_CONFIG.keys.youtube,
+				safety = BOT_CONFIG.options.youtube.safeSearch || 'none',
+				URL = this.baseQueryUrl + key + '&safeSearch=' + safety + '&q=' + query,
+				response = UrlFetchApp.fetch(URL),
+				json = response.getContentText(),
+				results = JSON.parse(response);
+			return results;
+		},
+		urlForResult: function (result) {
+			var id = result.id.videoId;
+			return this.urlForVideo(id);
+		},
+		attachFirstResultToMessage: function (results, message) {
+			var items = results.items,
+				first = items[0],
+				text = this.urlForResult(first);
+
+			message.text = text;
+		},
+		attachResultsToMessage: function (bot, results, message, max) {
+			var items = results.items,
+				resultsCount = items.length,
+				attachments = [];
+
+			message.text = 'Recieved ' + resultsCount + ' video results.';
+
+			//TODO...
+
+		},
+		run: function (bot, args) {
+			var query = internal.args.concat(args),
+				results = this.searchVideos(query),
+				resultsCount = results.items.length,
+				message = bot.makeMessage();
+
+			if (resultsCount > 0) {
+				this.attachFirstResultToMessage(results, message);
+				//this.attachResultsToMessage(bot, searchResults, message, 5);
+			} else {
+				message.text = 'No video results were found.';
+			}
+
+			message.send();
 		}
 	};
 
@@ -806,7 +882,7 @@ BotTasks = (function () {
 		run: function (bot, args) {
 			var queryRoot = "https://maps.googleapis.com/maps/api/place/textsearch/json?",
 				argQuery = "query=",
-				argKey = "&key=" + BOT_CONFIG.keys.googleApps,
+				argKey = "&key=" + BOT_CONFIG.keys.googleMaps,
 				query = internal.args.concat(args, '+'),
 				request = queryRoot + argQuery + query + argKey,
 				json = UrlFetchApp.fetch(request),
@@ -865,6 +941,91 @@ BotTasks = (function () {
 			}
 
 			message.send();
+		}
+	};
+
+	tasks.scholar = {
+		baseUrl: "http://ecology-service.cse.tamu.edu/BigSemanticsService/metadata.json?url=https%3A%2F%2Fscholar.google.com%2Fscholar%3Fq%3D",
+		run: function (bot, args) {
+			var query = internal.args.concat(args, "%20"),
+				request = this.baseUrl + query,
+				json = UrlFetchApp.fetch(request),
+				response = JSON.parse(json),
+				results,
+				text;
+
+			if (response) {
+				results = response.google_scholar_search.search_results;
+
+				//TODO: Send multiple messages in order to send all results.
+
+				if (results.length > 0) {
+					text = internal.args.concatElements(results, function (e, i) {
+						var result = e.google_scholar_search_result,
+							destination = result.destination_page,
+							title = result.title,
+							url = destination.location;
+
+						return i + ') ' + title + '\nUrl: ' + url;
+					}, '\n\n');
+				} else {
+					text = 'No scholar results found.';
+				}
+
+				bot.sendText(text);
+			} else {
+				bot.sendError('Scholar', 'Error while searching.');
+			}
+
+			/*
+						for (var i = 0; i < results.google_scholar_search.search_results.length; i++) {
+							paperNames += results.google_scholar_search.search_results[i].google_scholar_search_result.title;
+							paperNames += "\n";
+						}
+			*/
+		}
+	};
+
+	tasks.bing = {
+		baseUrl: 'http://ecology-service.cse.tamu.edu/BigSemanticsService/metadata.json?url=http%3A%2F%2Fwww.bing.com%2Fsearch%3Fq%3D',
+		textForResults: function (results, key, max) {
+			var text = null;
+
+			if (results.length > 0) {
+				text = internal.args.concatElements(results, function (e, i) {
+					var document = (key) ? e[key] : e,
+						title = document.title,
+						url = document.location;
+
+					return i + ') ' + title + '\nUrl: ' + url;
+				}, '\n\n', 0, max);
+			}
+
+			return text;
+		},
+		sendMessageWithResults: function (bot, results, key, title, max) {
+			var text = this.textForResults(results, key, max);
+
+			title = ((title) ? (title + '\n') : '');
+
+			if (!text) {
+				text = 'None';
+			}
+
+			bot.sendText(title + text);
+		},
+		run: function (bot, args) {
+			var query = internal.args.concat(args, '%20'),
+				request = this.baseUrl + query,
+				json = UrlFetchApp.fetch(request),
+				results = JSON.parse(json),
+				bing = results.bing_search_xpath,
+				searchResults = bing.search_results,
+				relatedSearches = bing.related_searches,
+				text;
+
+			this.sendMessageWithResults(bot, searchResults, 'rich_document', '---SEARCH RESULTS---', 5);
+			this.sendMessageWithResults(bot, relatedSearches, null, '---RELATED SEARCHES---', 5);
 		}
 	};
 
