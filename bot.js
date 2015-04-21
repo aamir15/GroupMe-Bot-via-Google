@@ -1,4 +1,4 @@
-/*global UrlFetchApp:true, Logger:true, console:true*/
+/*global UrlFetchApp:true, LanguageApp:true, Logger:true, console:true*/
 /*
 TODO: Readme stuff.
 
@@ -55,7 +55,7 @@ var BotFactory,
 			API Keys configurations.
 		*/
 		keys: {
-
+			googleApps: ''
 		},
 
 		options: {
@@ -239,7 +239,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		sendMessage: function (message) {
 			var options = {
 				method: 'post',
-				payload: this.getMessagePayload(message)
+				payload: JSON.stringify(this.getMessagePayload(message))
 			};
 
 			UrlFetchApp.fetch(APP_CONFIG.messages.send.url, options);
@@ -518,6 +518,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		init: function (config, extra) {
 			this.config = config;
 			this.messaging = {
+				attachments: GroupMeAttachmentFactory,
 				sender: new GroupMeMessageSender(),
 				decoder: new GroupMeMessageDecoder()
 			};
@@ -583,7 +584,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			if (task) {
 				task.run(this, args);
 			} else {
-				this.sendError('No Task Available', 'No task was available with the name "' + name + '".');
+				this.sendError('No Task Available', 'No task was available with the name "' + name + '."');
 			}
 		},
 
@@ -654,18 +655,61 @@ BotTasks = (function () {
 		return 'Hello World';
 	};
 
+	internal.args = {
+		concatFrom: function (args, splitter, start) {
+			return this.concat(args, splitter, start);
+		},
+
+		concatTo: function (args, splitter, end) {
+			return this.concat(args, splitter, undefined, end);
+		},
+
+		concat: function (args, splitter, start, end) {
+			if (!splitter) {
+				splitter = APP_CONFIG.command.argsSplit;
+			}
+
+			if (!start) {
+				start = 0;
+			}
+
+			if (end === undefined) {
+				end = args.length;
+			}
+
+			var text = "",
+				count = end - start,
+				i;
+
+			if (count > 0) {
+				if (count > 1) {
+					for (i = start; i < (end - 1); i += 1) {
+						text += args[i] + splitter;
+					}
+				}
+
+				text += args[i];
+			}
+
+			return text;
+		}
+	};
+
 	//MARK: Public Functions
 	/*
 		This is the task available to the bot as "helloWorld".
 	*/
 	tasks.helloWorld = {
 		//"Static" Variable available to this task through 'this' reserved word.
-		simple: true,
+		simple: false,
 		text: 'Hello World',
 
 		//Function that is actually called. Recieves a GroupMeBot instance, and an array of string arguments.
 		run: function (bot, args) {
 			var text = 'Hello World',
+				attachmentFactory = bot.messaging.attachments,
+				attachments = [],
+				map,
 				message;
 
 			if (this.simple) {
@@ -675,9 +719,152 @@ BotTasks = (function () {
 				bot.sendText(text);
 			} else {
 				message = bot.makeMessage();
+				
+				map = attachmentFactory.makeLocation(96.0, -36.0, 'Hello World');
+				attachments.push(map);
+				
+				/*
+                image = attachmentFactory.makeImage(url);
+				attachments.push(image);
+                */
+				
 				message.text = text;
+				message.attachments = attachments;
 				message.send();
 			}
+		}
+	};
+
+	tasks.translate = {
+		run: function (bot, args) {
+			var sourceLanguage = args[0],
+				targetLanguage = args[1],
+				text = internal.args.concat(args, ' ', 2),
+				result = LanguageApp.translate(text, sourceLanguage, targetLanguage),
+				message = bot.makeMessage();
+
+			message.text = result;
+			message.send();
+		}
+	};
+
+	tasks.find = {
+		mapOutput: false,
+		defaultMaxResults: 5,
+		textForResult: function (result) {
+			var rating;
+
+			if (result.rating) {
+				rating = " (" + result.rating + " stars)";
+			} else {
+				rating = "";
+			}
+
+			return "* " + result.name + rating;
+		},
+		convertResultsToText: function (results, max) {
+			var textResults = [],
+				textResult,
+				result,
+				i;
+
+			for (i = 0; i < Math.min(max, results.length); i += 1) {
+				result = results[i];
+				textResult = this.textForResult(result);
+				textResults.push(textResult);
+			}
+
+			return textResults;
+		},
+		attachMapResults: function (bot, message, results, max) {
+			this.attachTextResults(message, results, max);
+
+			var attachmentFactory = bot.messaging.attachments,
+				attachments = [],
+				attachment,
+				result,
+				location,
+				name,
+				text,
+				i;
+
+			for (i = 0; i < Math.min(max, results.length); i += 1) {
+				result = results[i];
+				name = result.name;
+				location = result.geometry.location;
+				attachment = attachmentFactory.makeLocation(location.lat, location.lng, name);
+				attachments.push(attachment);
+			}
+
+			message.attachments = attachments;
+		},
+		attachTextResults: function (message, results, max) {
+			var resultsText = this.convertResultsToText(results, max),
+				text = internal.args.concat(resultsText, '\n');
+			message.text = text;
+		},
+		run: function (bot, args) {
+			var queryRoot = "https://maps.googleapis.com/maps/api/place/textsearch/json?",
+				argQuery = "query=",
+				argKey = "&key=" + BOT_CONFIG.keys.googleApps,
+				query = internal.args.concat(args, '+'),
+				request = queryRoot + argQuery + query + argKey,
+				json = UrlFetchApp.fetch(request),
+				parsed = JSON.parse(json),
+				results = parsed.results,
+				message = bot.makeMessage();
+
+			Logger.log(json);
+
+			if (results.length > 0) {
+				if (this.mapOutput) {
+					this.attachMapResults(bot, message, results, this.defaultMaxResults);
+				} else {
+					this.attachTextResults(message, results, this.defaultMaxResults);
+				}
+			} else {
+				message.text = 'Nothing found.';
+			}
+
+			message.send();
+		}
+	};
+
+	tasks.weather = {
+		textForResult: function (results) {
+			var name = results.name,
+				coord = results.coord, //Location
+				main = results.main, //temp/_min/_max
+				wind = results.wind,
+				weather = results.weather[0],
+				text;
+
+			text = 'Weather - ' + name + '\n' +
+				'Temperature: ' + main.temp + '°F.' + '\n' +
+				'Wind: ' + wind.speed + ' Heading: ' + wind.deg + '\n' +
+				'Description: ' + weather.description;
+			return text;
+		},
+		attachResultsToMessage: function (results, message) {
+			var text = this.textForResult(results);
+			message.text = text;
+		},
+		run: function (bot, args) {
+			var queryRoot = "http://api.openweathermap.org/data/2.5/weather?units=imperial&q=",
+				query = internal.args.concat(args, "%20"), //%20 = ' '
+				request = queryRoot + query,
+				json = UrlFetchApp.fetch(request),
+				results = JSON.parse(json),
+				result,
+				message = bot.makeMessage();
+
+			if (results) {
+				this.attachResultsToMessage(results, message);
+			} else {
+				message.text = 'No weather info avaiable.';
+			}
+
+			message.send();
 		}
 	};
 
@@ -732,7 +919,7 @@ function doPost(event) {
 function runDebugText() {
 	'use strict';
 
-	var text = APP_CONFIG.command.key + 'aTestCommand a b c d e f',
+	var text = APP_CONFIG.command.key + 'find doctor in 77840',
 		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
 		bot = botFactory.makeBot({
 			server: true
