@@ -58,7 +58,7 @@ var BotFactory,
 			API Keys configurations.
 		*/
 		keys: {
-			googleMaps: '',
+			googleApps: '',
 			youtube: ''
 		},
 
@@ -72,16 +72,36 @@ var BotFactory,
 			Looping schedule.
 		*/
 		schedule: {
-			tolerance: 1, //Tolerance in minutes.
+			blocking: {
+				minutesInDay: 1440,
 
-			//Array of task names. Should be available in BotFactory's TASK_DEFINITIONS.
-			tasks: ['sendText'],
+				/*
+				  How often in minutes the script is called. 
+				  
+				  Should be the greatest common denominator between scheduled tasks.
+				*/
+				interval: 1
+			},
 
-			//Configuration for each task, keyed by name.
+			//Array of queued tasks.
+			queue: ['a', 'b'],
+
+			//Configuration for each queued task, keyed by name.
 			config: {
-				sendText: {
-					args: ["This is a schedule message."],
-					minutes: 5
+				a: {
+					//Task Name Should be available in BotFactory's TASK_DEFINITIONS.
+					task: 'sendText',
+
+					//Args to pass to the task.
+					args: ["This is scheduled to run every 1 minutes."],
+
+					//How often to run the task in minutes.
+					interval: 1
+				},
+				b: {
+					task: 'sendText',
+					args: ["This is scheduled to run every 2 minutes."],
+					interval: 2
 				}
 			}
 
@@ -419,22 +439,24 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 		initTime: function () {
 			var date = new Date(),
-				minutes = date.minutes,
+                minutes = (23 * date.getHours()) + date.getMinutes(),
+                interval = this.bot.config.schedule.blocking.interval,
+                //span = this.bot.config.schedule.blocking.minutesInDay,
+                block = Math.ceil(minutes / interval),
 				time = {
 					date: date,
 					minutes: minutes,
+					block: block,
 					timeBlockCache: {
 						1: true //Always execute 1 minute intervals.
 					},
-					computeTimeBlock: function (interval) {
-						var time = this.minutes,
-							check = time % interval,
-							isWithin = ((time / check) === 0);
-						return isWithin;
+					computeWithinBlock: function (interval) {
+                        botDebug.log('I: ' + interval + ' B: ' + this.block + ' R: ' + (this.block % interval));
+						return ((this.block % interval) === 0);
 					},
 					withinTimeBlock: function (interval) {
-						if (this.timeBlockCache[interval]) {
-							this.timeBlockCache[interval] = this.computeTimeBlock(interval);
+						if (!this.timeBlockCache[interval]) {
+							this.timeBlockCache[interval] = this.computeWithinBlock(interval);
 						}
 
 						return this.timeBlockCache[interval];
@@ -448,57 +470,65 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		runScheduledTasks: function () {
 			var scheduler = this,
 				schedule = this.bot.config.schedule,
-				scheduledTasks = schedule.tasks,
-				task,
-				filteredTasks = [];
+				scheduleQueue = schedule.queue,
+				queueTaskConfig,
+				filteredQueueTasks = [];
 
-			scheduledTasks.forEach(function (taskName) {
-				task = schedule.config[taskName];
+			scheduleQueue.forEach(function (queueTask) {
+				queueTaskConfig = schedule.config[queueTask];
 
-				if (task === undefined) {
-					throw 'No task named "' + taskName + '" was configured in the schedule.';
+				if (!queueTaskConfig) {
+					throw 'No queue task named "' + queueTask + '" was configured in the schedule.';
 				}
 
-				if (scheduler.shouldRunTask(task)) {
-					filteredTasks.push(taskName);
+				if (scheduler.shouldRunQueueTask(queueTaskConfig)) {
+					filteredQueueTasks.push(queueTask);
 				}
 			});
 
-			this.runScheduleTasksWithNames(filteredTasks);
+			this.runScheduledTasksWithNames(filteredQueueTasks);
 		},
 
-		runAllTasks: function () {
-			var tasks = this.bot.config.schedule.tasks;
-			this.runScheduleTasksWithNames(tasks);
+		runAllQueuedTasks: function () {
+			var queueTasks = this.bot.config.schedule.queue;
+			this.runScheduledTasksWithNames(queueTasks);
 		},
 
-		runScheduleTasksWithNames: function (taskNames) {
-			var args,
+		runScheduledTasksWithNames: function (queueTasks) {
+			var config,
+				taskName,
+				args,
 				bot = this.bot,
-				scheduledTasksConfigs = this.bot.config.schedule.config,
-				config;
+				scheduledTasksConfigs = this.bot.config.schedule.config;
 
-			taskNames.forEach(function (task) {
+			queueTasks.forEach(function (task) {
 				config = scheduledTasksConfigs[task];
-
-				if (config) {
-					args = config.args || [];
-				}
-
-				bot.runTask(task, args);
+				taskName = config.task;
+				args = config.args || [];
+				bot.runTask(taskName, args);
 			});
 		},
 
 		/*
 			Compares the minutes to the current time.
 		*/
-		shouldRunTask: function (taskConfig) {
-			var minutes = taskConfig.minutes;
-			return this.isTimeToRun(minutes);
+		shouldRunQueueTask: function (taskConfig) {
+			var interval = taskConfig.interval,
+				shouldRun;
+
+			if (!interval) {
+				throw 'The queue task "' + taskConfig.task + '" has an invalid interval specified.';
+			}
+
+			shouldRun = this.isTimeToRun(interval);
+
+			botDebug.log(((shouldRun) ? 'Should' : 'Shouldn\'t') + ' run task ' + taskConfig.task + ' i: ' + interval);
+
+			return shouldRun;
 		},
 
-		isTimeToRun: function (minutes) {
-			return this.time.withinTimeBlock(minutes);
+		isTimeToRun: function (interval) {
+			return this.time.withinTimeBlock(interval);
 		}
 
 	};
@@ -579,7 +609,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		/**
 		The bot runs all its tasks.
 		*/
-		runScheduleTasks: function () {
+		runScheduledTasks: function () {
 			var scheduler = new BotScheduler(this);
 			scheduler.runScheduledTasks();
 		},
@@ -1029,6 +1059,83 @@ BotTasks = (function () {
 		}
 	};
 
+	tasks.league = {
+		baseUrl: "http://ecology-service.cse.tamu.edu/BigSemanticsService/metadata.json?url=http%3A%2F%2Fgameinfo.na.leagueoflegends.com%2Fen%2Fgame-info%2Fchampions%2F",
+		abilityKey: {
+			'passive': 0,
+			'q': 1,
+			'w': 2,
+			'e': 3,
+			'r': 4,
+			'ult': 5
+		},
+		filterAbilities: function (abilityList, filter) {
+			var key,
+				abilities = [];
+
+			filter = filter || 'all';
+
+			switch (filter) {
+			case 'q':
+			case 'w':
+			case 'e':
+			case 'r':
+			case 'ult':
+			case 'passive':
+				abilities.push(abilityList[this.abilityKey[filter]]);
+				break;
+			case 'all':
+				abilities = abilityList;
+				break;
+			}
+
+			return abilities;
+		},
+		sendAbilityDetails: function (bot, ability, index) {
+			var abilityText = ability.title + ":\n";
+
+			if (ability.description) {
+				abilityText += ability.description + "\n";
+			}
+
+			if (ability.cost) {
+				abilityText += "Cost: " + ability.cost + "\n";
+			}
+
+			if (ability.range) {
+				abilityText += "Range: " + ability.range + "\n";
+			}
+
+			bot.sendText(abilityText);
+		},
+		sendDataForHero: function (bot, hero, abilityFilter) {
+			var league = this,
+				query = hero.toLowerCase(),
+				request = this.baseUrl + query,
+				json = UrlFetchApp.fetch(request),
+				response = JSON.parse(json),
+				abilities,
+				results,
+				text;
+
+			if (response) {
+				abilities = response.league_champion.abilites;
+				abilities = this.filterAbilities(abilities, abilityFilter);
+
+				abilities.forEach(function (ability, i) {
+					league.sendAbilityDetails(bot, ability, i);
+				});
+			} else {
+				bot.sendError('League', 'Error while finding champion ' + hero + '.');
+			}
+		},
+		run: function (bot, args) {
+			var hero = args[0],
+				filter = args[1];
+			this.sendDataForHero(bot, hero, filter);
+		}
+	};
+
 	tasks.sendText = {
 		run: function (bot, args) {
 			var text = args[0];
@@ -1080,7 +1187,7 @@ function doPost(event) {
 function runDebugText() {
 	'use strict';
 
-	var text = APP_CONFIG.command.key + 'find doctor in 77840',
+	var text = APP_CONFIG.command.key + 'league katarina r',
 		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
 		bot = botFactory.makeBot({
 			server: true
@@ -1097,7 +1204,7 @@ function runScheduledTasks() {
 			server: true
 		});
 
-	bot.runScheduleTasks();
+	bot.runScheduledTasks();
 }
 
 /*
