@@ -58,6 +58,7 @@ var BotDebug,
 					key: '',
 					cx: ''
 				},
+				maps: '',
 				youtube: ''
 			}
 		},
@@ -72,6 +73,10 @@ var BotDebug,
 			},
 
 			google: {
+				maps: {
+					mapOutput: false,
+					maxResults: 5
+				},
 				search: {
 					defaultLimit: 6,
 					maxLimit: 10,
@@ -110,11 +115,11 @@ var BotDebug,
 			},
 
 			//Array of queued tasks.
-			queue: ['a', 'b'],
+			queue: [], //['example'],
 
 			//Configuration for each queued task, keyed by name.
 			config: {
-				a: {
+				example: {
 					//Task Name Should be available in BotFactory's TASK_DEFINITIONS.
 					task: 'sendText',
 
@@ -123,11 +128,6 @@ var BotDebug,
 
 					//How often to run the task in minutes.
 					interval: 1
-				},
-				b: {
-					task: 'sendText',
-					args: ["This is scheduled to run every 2 minutes."],
-					interval: 2
 				}
 			}
 
@@ -823,7 +823,8 @@ BotTasks = (function () {
 			description: 'Displays the help information for a task.'
 		},
 		showHelpMessage: function (bot) {
-			var text = BotUtilities.getValue(bot.config.options.help.message);
+			var message = bot.config.options.help.message,
+				text = BotUtilities.getValue(message);
 			bot.sendText(text);
 		},
 		helpTextForTask: function (bot, task) {
@@ -838,15 +839,15 @@ BotTasks = (function () {
 					text = task + ' Task\n';
 
 					if (help.invocation) {
-						text += 'Invocation: ' + BotUtilities.getValue(help.invocation);
+						text += 'Invocation: ' + BotUtilities.getValue(help.invocation) + '\n';
 					}
 
 					if (help.description) {
-						text += 'Description: ' + BotUtilities.getValue(help.description);
+						text += 'Description: ' + BotUtilities.getValue(help.description) + '\n';
 					}
 
 					if (help.example) {
-						text += 'Example: ' + BotUtilities.getValue(help.example);
+						text += 'Example: ' + BotUtilities.getValue(help.example) + '\n';
 					}
 
 				} else {
@@ -864,12 +865,16 @@ BotTasks = (function () {
 			bot.sendText(text);
 		},
 		run: function (bot, args) {
-			var task = args[0];
+			var task;
+
+			if (args) {
+				task = internal.args.concat(args); //TODO: Create utiltiy for retrieving this argument.
+			}
 
 			if (task !== undefined) {
 				this.showHelpForTask(bot, task);
 			} else {
-				this.showHelpMessage();
+				this.showHelpMessage(bot);
 			}
 		}
 	};
@@ -985,7 +990,7 @@ BotTasks = (function () {
 
 			var key = BOT_CONFIG.keys.google.youtube,
 				safety = BOT_CONFIG.options.google.youtube.safeSearch || 'none',
-				URL = this.baseQueryUrl + key + '&safeSearch=' + safety + 'maxResults=' + this.config.maxResults + '&q=' + query,
+				URL = this.baseQueryUrl + key + '&safeSearch=' + safety + '&maxResults=' + this.config.maxResults + '&q=' + query,
 				response = UrlFetchApp.fetch(URL),
 				json = response.getContentText(),
 				results = JSON.parse(response);
@@ -1036,26 +1041,50 @@ BotTasks = (function () {
 			example: '!translate en sp Translation to spanish please.',
 			description: 'Translates text from one language to another.'
 		},
+		validate: function (source, target, text) {
+			var issue = null;
+
+			if (!source) {
+				issue = 'No source language specified.';
+			}
+
+			if (!target) {
+				issue = 'No target language specified.';
+			}
+
+			if (!text || text.length === 0) {
+				issue = 'No text specified.';
+			}
+
+			return issue;
+		},
+		translate: function (source, target, text) {
+			return LanguageApp.translate(text, source, target);
+		},
 		run: function (bot, args) {
 			var sourceLanguage = args[0],
 				targetLanguage = args[1],
-				text = internal.args.concat(args, ' ', 2),
-				result = LanguageApp.translate(text, sourceLanguage, targetLanguage),
+				text = internal.args.concatFrom(args, ' ', 2),
+				error = this.validate(sourceLanguage, targetLanguage, text),
 				message = bot.makeMessage();
 
-			message.text = result;
+			if (error === null) {
+				message.text = this.translate(text);
+			} else {
+				message.text = error;
+			}
+
 			message.send();
 		}
 	};
 
-	tasks.find = {
+	tasks.map = {
 		help: {
-			invocation: '!find <search>',
-			example: '!find grocery store',
+			invocation: '!map <search>',
+			example: '!map grocery store',
 			description: 'Returns the first Google Maps result.'
 		},
-		mapOutput: false,
-		defaultMaxResults: 5,
+		baseRequestUrl: "https://maps.googleapis.com/maps/api/place/textsearch/json?",
 		textForResult: function (result) {
 			var rating;
 
@@ -1090,7 +1119,7 @@ BotTasks = (function () {
 				result,
 				location,
 				name,
-				text,
+				text = 'Found ' + results.length + ' results.',
 				i;
 
 			for (i = 0; i < Math.min(max, results.length); i += 1) {
@@ -1101,6 +1130,7 @@ BotTasks = (function () {
 				attachments.push(attachment);
 			}
 
+			message.text = text;
 			message.attachments = attachments;
 		},
 		attachTextResults: function (message, results, max) {
@@ -1108,27 +1138,35 @@ BotTasks = (function () {
 				text = internal.args.concat(resultsText, '\n');
 			message.text = text;
 		},
-		run: function (bot, args) {
-			var queryRoot = "https://maps.googleapis.com/maps/api/place/textsearch/json?",
-				argQuery = "query=",
-				argKey = "&key=" + bot.config.keys.googleMaps,
-				query = internal.args.concat(args, '+'),
-				request = queryRoot + argQuery + query + argKey,
+		find: function (key, query) {
+			query = BotUtilities.sanitizeUrlParameter(query);
+
+			var request = this.baseRequestUrl + 'query=' + query + '&key=' + key,
 				json = UrlFetchApp.fetch(request),
 				parsed = JSON.parse(json),
-				results = parsed.results,
+				results = parsed.results;
+
+			return results;
+		},
+		run: function (bot, args) {
+			var query = internal.args.concat(args),
+				key = bot.config.keys.google.maps,
+				config = bot.config.options.google.maps,
+				results,
 				message = bot.makeMessage();
 
-			Logger.log(json);
+			if (query.length) {
+				results = this.find(key, query);
+			}
 
 			if (results.length > 0) {
-				if (this.mapOutput) {
-					this.attachMapResults(bot, message, results, this.defaultMaxResults);
+				if (config.mapOutput) {
+					this.attachMapResults(bot, message, results, config.maxResults);
 				} else {
-					this.attachTextResults(message, results, this.defaultMaxResults);
+					this.attachTextResults(message, results, config.maxResults);
 				}
 			} else {
-				message.text = 'Nothing found.';
+				message.text = 'No map results found.';
 			}
 
 			message.send();
@@ -1393,7 +1431,7 @@ BotTasks = (function () {
 						response = JSON.parse(json),
 						results = [];
 
-					if (response) {
+					if (response && Array.isArray(response.items)) {
 						response.items.forEach(function (result) {
 							results.push(search.convertResponseItem(result));
 						});
@@ -1516,6 +1554,8 @@ BotTasks = (function () {
 					var data = result.getResultsData(),
 						message = bot.makeMessage(),
 						image = attachmentFactory.makeImage(data.link);
+
+					//TODO: Remove image. Add option to display image information (origial link, etc.)
 
 					message.text = 'From: ' + data.website;
 					message.attachments = [image];
