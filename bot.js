@@ -5,25 +5,17 @@ TODO: Readme stuff.
 Replace BOT_ID with the bot identifier. Make an ID at https://dev.groupme.com/bots.
 */
 var BOT_ID = '', //REPLACE WITH YOUR BOT'S ID.
-	botDebug = {
-		debug: true,
-		log: function (text) {
-			'use strict';
-			Logger.log(text);
-		}
-	};
+	botVersion = '1.2.0';
 
-var BotFactory,
+var BotDebug,
+	BotUtilities,
+	BotFactory,
 	BotTasks,
 
 	/**
 	Application Configuration
 	*/
 	APP_CONFIG = {
-		bot: {
-			id: BOT_ID,
-			name: ''
-		},
 
 		command: {
 			key: '!', //!command
@@ -34,6 +26,7 @@ var BotFactory,
 			limits: {
 				text: 1000 //1000 character limit.	
 			},
+			//GroupMe Unique Message ID Keygen
 			keygen: {
 				multiplier: 1000000,
 				make: function () {
@@ -54,17 +47,50 @@ var BotFactory,
 	Channel Bot Configuration
 	*/
 	BOT_CONFIG = {
+		id: BOT_ID,
+
 		/*
 			API Keys configurations.
 		*/
 		keys: {
-			googleApps: '',
-			youtube: ''
+			google: {
+				search: {
+					key: '',
+					cx: ''
+				},
+				youtube: ''
+			}
 		},
 
 		options: {
-			youtube: {
-				safeSearch: 'moderate' //Moderate, Strict, None	
+			help: {
+				message: 'GroupMe Bot - v' + botVersion + '.\nType !list for a list of functions.'
+			},
+			list: {
+				showAllPages: false,
+				maxPerPage: 50
+			},
+
+			google: {
+				search: {
+					defaultLimit: 6,
+					maxLimit: 10,
+					safeSearch: 'high',
+					lr: 'lang_en'
+				},
+				image: {
+					type: 'image',
+					defaultLimit: 1,
+					maxLimit: 1,
+					safeSearch: 'high' //off, medium, high			
+				},
+				youtube: {
+					safeSearch: 'moderate'
+				}
+			},
+			bing: {
+				maxResults: 5,
+				showRelated: false
 			}
 		},
 
@@ -108,16 +134,79 @@ var BotFactory,
 		}
 	};
 
+BotDebug = (function () {
+	'use strict';
+
+	var factory = {
+		debug: true,
+		sendToDebug: true,
+		log: function (text) {
+			Logger.log(text);
+		},
+		logMessage: function (options) {
+			Logger.log(JSON.stringify(options));
+		}
+	};
+
+	return factory;
+}());
+
+BotUtilities = (function () {
+	'use strict';
+
+	var utilities = {};
+
+	utilities.isNotNull = function (value) {
+		return (value !== null || value !== undefined);
+	};
+
+	/*
+		Attempts to retrieve a value from the passed object.
+		
+		If the object is a function, execute it before returning.
+	*/
+	utilities.getValue = function (object, defaultValue) {
+		var value = object;
+
+		if (this.isNotNull(object) === false) {
+			value = defaultValue;
+		}
+
+		if (typeof (object) === 'function') {
+			value = object();
+		}
+
+		return value;
+	};
+
+	utilities.getNumberValue = function (object, defaultValue) {
+		var value = this.getValue(object, defaultValue);
+		return Number(value);
+	};
+
+	/*
+		Sanitize a raw input query for URL purposes.
+		
+		Makes sure users can't inject arbitrary parameters.
+	*/
+	utilities.sanitizeUrlParameter = function (query) {
+		var sanitized = encodeURIComponent(query);
+		return sanitized;
+	};
+
+	return utilities;
+}());
+
 BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 	'use strict';
 
 	//MARK: Factory validation.
-	if (!APP_CONFIG.bot.id || APP_CONFIG.bot.id.length === 0) {
-		throw 'Invalid configuration. No Bot Identifier was specified.';
+	if (!APP_CONFIG) {
+		throw 'Invalid configuration. No App Configuration was specified.';
 	}
 
-	if (!BOT_CONFIG) {
-		BOT_CONFIG = {};
+	if (!BOT_CONFIG.id || BOT_CONFIG.id.length === 0) {
+		throw 'Invalid configuration. No Bot Identifier was specified.';
 	}
 
 	if (!TASK_DEFINITIONS) {
@@ -210,45 +299,14 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			};
 		}
 
-
-		//TODO: Add Remaining types. Someone figure out the emoji charmap if we got time. Can also make a dictionary/object of all that for easy access.
-
-		/*
-		{
-		      "type": "image",
-		      "url": "http://i.groupme.com/123456789"
-		    },
-		    {
-		      "type": "location",
-		      "lat": "40.738206",
-		      "lng": "-73.993285",
-		      "name": "GroupMe HQ"
-		    },
-		    {
-		      "type": "split",
-		      "token": "SPLIT_TOKEN"
-		    },
-		    {
-		      "type": "emoji",
-		      "placeholder": "☃",
-		      "charmap": [
-		        [
-		          1,
-		          42
-		        ],
-		        [
-		          2,
-		          34
-		        ]
-		      ]
-		    }
-		*/
 	};
 
 	/**
 	Factory and sender for GroupMeMessage objects.
 	*/
-	GroupMeMessageSender = function () {};
+	GroupMeMessageSender = function (id) {
+		this.botId = id;
+	};
 
 	GroupMeMessageSender.prototype = {
 
@@ -264,7 +322,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 		getMessagePayload: function (message) {
 			var payload = message.buildPayload();
 
-			payload.bot_id = APP_CONFIG.bot.id;
+			payload.bot_id = this.botId;
 			payload.source_guid = message.id;
 
 			return payload;
@@ -276,7 +334,11 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 				payload: JSON.stringify(this.getMessagePayload(message))
 			};
 
-			UrlFetchApp.fetch(APP_CONFIG.messages.send.url, options);
+			if (BotDebug.sendToDebug) {
+				BotDebug.logMessage(options);
+			} else {
+				UrlFetchApp.fetch(APP_CONFIG.messages.send.url, options);
+			}
 		}
 
 	};
@@ -291,24 +353,6 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 	GroupMeDecodedMessage.prototype = {
 
 		init: function (data) {
-
-			/* TODO: Remove this later.
-    {
-  "attachments": [],
-  "avatar_url": "http://i.groupme.com/123456789",
-  "created_at": 1302623328,
-  "group_id": "1234567890",
-  "id": "1234567890",
-  "name": "John",
-  "sender_id": "12345",
-  "sender_type": "user",
-  "source_guid": "GUID",
-  "system": false,
-  "text": "Hello world ☃☃",
-  "user_id": "1234567890"
-}
-    */
-
 			this.data = data;
 		},
 
@@ -373,8 +417,8 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			return this.getSender.type !== 'bot';
 		},
 
-		senderIsNotThisBot: function () {
-			return this.getSender.id !== APP_CONFIG.bot.id;
+		senderIsNotBotWithId: function (id) {
+			return this.getSender.id !== id;
 		}
 
 		//TODO: Add any helper functions. (hasAttachments, etc.)
@@ -439,10 +483,10 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 		initTime: function () {
 			var date = new Date(),
-                minutes = (23 * date.getHours()) + date.getMinutes(),
-                interval = this.bot.config.schedule.blocking.interval,
-                //span = this.bot.config.schedule.blocking.minutesInDay,
-                block = Math.ceil(minutes / interval),
+				minutes = (23 * date.getHours()) + date.getMinutes(),
+				interval = this.bot.config.schedule.blocking.interval,
+				//span = this.bot.config.schedule.blocking.minutesInDay,
+				block = Math.ceil(minutes / interval),
 				time = {
 					date: date,
 					minutes: minutes,
@@ -451,7 +495,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 						1: true //Always execute 1 minute intervals.
 					},
 					computeWithinBlock: function (interval) {
-                        botDebug.log('I: ' + interval + ' B: ' + this.block + ' R: ' + (this.block % interval));
+						BotDebug.log('I: ' + interval + ' B: ' + this.block + ' R: ' + (this.block % interval));
 						return ((this.block % interval) === 0);
 					},
 					withinTimeBlock: function (interval) {
@@ -501,8 +545,8 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 				bot = this.bot,
 				scheduledTasksConfigs = this.bot.config.schedule.config;
 
-			queueTasks.forEach(function (task) {
-				config = scheduledTasksConfigs[task];
+			queueTasks.forEach(function (queueTask) {
+				config = scheduledTasksConfigs[queueTask];
 				taskName = config.task;
 				args = config.args || [];
 				bot.runTask(taskName, args);
@@ -522,7 +566,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 
 			shouldRun = this.isTimeToRun(interval);
 
-			botDebug.log(((shouldRun) ? 'Should' : 'Shouldn\'t') + ' run task ' + taskConfig.task + ' i: ' + interval);
+			BotDebug.log(((shouldRun) ? 'Should' : 'Shouldn\'t') + ' run task ' + taskConfig.task + ' i: ' + interval);
 
 			return shouldRun;
 		},
@@ -560,10 +604,12 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 	GroupMeBot.prototype = {
 
 		init: function (config, extra) {
+			var id = config.id;
+
 			this.config = config;
 			this.messaging = {
 				attachments: GroupMeAttachmentFactory,
-				sender: new GroupMeMessageSender(),
+				sender: new GroupMeMessageSender(id),
 				decoder: new GroupMeMessageDecoder()
 			};
 
@@ -626,10 +672,23 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			var task = TASK_DEFINITIONS[name];
 
 			if (task) {
-				task.run(this, args);
+				try {
+					task.run(this, args);
+				} catch (e) {
+					this.sendError('Error Running Task', e);
+				}
 			} else {
-				this.sendError('No Task Available', 'No task was available with the name "' + name + '."');
+				this.sendError('No Task Available', 'No task was available with the name "' + name + '".');
 			}
+		},
+
+		//MARK: Utility
+		hasTask: function (name) {
+			return this.getTask(name) !== undefined;
+		},
+
+		getTask: function (name) {
+			return TASK_DEFINITIONS[name];
 		},
 
 		//MARK: Responses
@@ -658,7 +717,7 @@ BotFactory = function (APP_CONFIG, BOT_CONFIG, TASK_DEFINITIONS) {
 			if (!this.isServer) {
 				this.sendText(text);
 			} else {
-				botDebug.log(text);
+				BotDebug.log(text);
 			}
 		}
 
@@ -699,7 +758,16 @@ BotTasks = (function () {
 		return 'Hello World';
 	};
 
+	internal.tasks = {
+
+		count: function () {
+			return Object.keys(tasks);
+		}
+
+	};
+
 	internal.args = {
+
 		concatFrom: function (args, splitter, start) {
 			return this.concat(args, splitter, start);
 		},
@@ -749,10 +817,120 @@ BotTasks = (function () {
 	};
 
 	//MARK: Public Functions
+	tasks.help = {
+		help: {
+			invocation: '!help <~task>',
+			description: 'Displays the help information for a task.'
+		},
+		showHelpMessage: function (bot) {
+			var text = BotUtilities.getValue(bot.config.options.help.message);
+			bot.sendText(text);
+		},
+		helpTextForTask: function (bot, task) {
+			var text,
+				help,
+				taskDefinition = bot.getTask(task);
+
+			if (taskDefinition) {
+				help = taskDefinition.help;
+
+				if (help) {
+					text = task + ' Task\n';
+
+					if (help.invocation) {
+						text += 'Invocation: ' + BotUtilities.getValue(help.invocation);
+					}
+
+					if (help.description) {
+						text += 'Description: ' + BotUtilities.getValue(help.description);
+					}
+
+					if (help.example) {
+						text += 'Example: ' + BotUtilities.getValue(help.example);
+					}
+
+				} else {
+					text = 'There is no help info for task "' + task + '".';
+				}
+
+			} else {
+				text = 'The task "' + task + '" is not available to this bot.';
+			}
+
+			return text;
+		},
+		showHelpForTask: function (bot, task) {
+			var text = this.helpTextForTask(bot, task);
+			bot.sendText(text);
+		},
+		run: function (bot, args) {
+			var task = args[0];
+
+			if (task !== undefined) {
+				this.showHelpForTask(bot, task);
+			} else {
+				this.showHelpMessage();
+			}
+		}
+	};
+
+	tasks.list = {
+		help: {
+			invocation: '!list <page>',
+			description: function () {
+				var taskCount = internal.tasks.count();
+				return 'There are currently "' + taskCount + '" tasks available to this bot.';
+			}
+		},
+		listDescriptionForTask: function (task) {
+			var taskDefinition = tasks[task],
+				help = taskDefinition.help,
+				text;
+
+			if (help && help.list) {
+				text = BotUtilities.getValue(help.list, task);
+			} else {
+				text = task;
+			}
+
+			return APP_CONFIG.command.key + text;
+		},
+		makeListForPage: function (page, pageSize) {
+			var taskNames = Object.keys(tasks),
+				start = (page * pageSize),
+				end = Math.min(start + pageSize, taskNames.length),
+				list;
+
+			list = taskNames.slice(start, end);
+
+			return list;
+		},
+		listTasks: function (bot, page, pageSize) {
+			var listDefinition = this,
+				list = this.makeListForPage(page, pageSize),
+				helpInfo,
+				text = internal.args.concatElements(list, function (e) {
+					return listDefinition.listDescriptionForTask(e);
+				}, ', ');
+
+			bot.sendText(text);
+		},
+		run: function (bot, args) {
+			var page = BotUtilities.getNumberValue(args[0], 0),
+				pageSize = bot.config.options.list.maxPerPage;
+			this.listTasks(bot, page, pageSize);
+		}
+	};
+
 	/*
 		This is the task available to the bot as "helloWorld".
 	*/
 	tasks.helloWorld = {
+		help: {
+			invocation: '!helloWorld',
+			description: 'Hello world!'
+		},
+
 		//"Static" Variable available to this task through 'this' reserved word.
 		simple: false,
 		text: 'Hello World',
@@ -789,18 +967,29 @@ BotTasks = (function () {
 	};
 
 	tasks.video = {
+		help: {
+			invocation: '!video <search>',
+			example: '!video hello world',
+			description: 'Returns the first video found on youtube with the search provided.'
+		},
+		config: {
+			maxResults: 1
+		},
 		baseVideoUrl: 'https://www.youtube.com/watch?v=',
 		baseQueryUrl: 'https://www.googleapis.com/youtube/v3/search?part=id&type=video&key=',
 		urlForVideo: function (id) {
 			return this.baseVideoUrl + id;
 		},
 		searchVideos: function (query) {
-			var key = BOT_CONFIG.keys.youtube,
-				safety = BOT_CONFIG.options.youtube.safeSearch || 'none',
-				URL = this.baseQueryUrl + key + '&safeSearch=' + safety + '&q=' + query,
+			query = BotUtilities.sanitizeUrlParameter(query);
+
+			var key = BOT_CONFIG.keys.google.youtube,
+				safety = BOT_CONFIG.options.google.youtube.safeSearch || 'none',
+				URL = this.baseQueryUrl + key + '&safeSearch=' + safety + 'maxResults=' + this.config.maxResults + '&q=' + query,
 				response = UrlFetchApp.fetch(URL),
 				json = response.getContentText(),
 				results = JSON.parse(response);
+
 			return results;
 		},
 		urlForResult: function (result) {
@@ -842,6 +1031,11 @@ BotTasks = (function () {
 	};
 
 	tasks.translate = {
+		help: {
+			invocation: '!translate <from> <to> <text>',
+			example: '!translate en sp Translation to spanish please.',
+			description: 'Translates text from one language to another.'
+		},
 		run: function (bot, args) {
 			var sourceLanguage = args[0],
 				targetLanguage = args[1],
@@ -855,6 +1049,11 @@ BotTasks = (function () {
 	};
 
 	tasks.find = {
+		help: {
+			invocation: '!find <search>',
+			example: '!find grocery store',
+			description: 'Returns the first Google Maps result.'
+		},
 		mapOutput: false,
 		defaultMaxResults: 5,
 		textForResult: function (result) {
@@ -912,7 +1111,7 @@ BotTasks = (function () {
 		run: function (bot, args) {
 			var queryRoot = "https://maps.googleapis.com/maps/api/place/textsearch/json?",
 				argQuery = "query=",
-				argKey = "&key=" + BOT_CONFIG.keys.googleMaps,
+				argKey = "&key=" + bot.config.keys.googleMaps,
 				query = internal.args.concat(args, '+'),
 				request = queryRoot + argQuery + query + argKey,
 				json = UrlFetchApp.fetch(request),
@@ -937,6 +1136,11 @@ BotTasks = (function () {
 	};
 
 	tasks.weather = {
+		help: {
+			invocation: '!weather <city>',
+			example: '!weather Bryan, Texas',
+			description: 'Displays the weather from given city.'
+		},
 		textForResult: function (results) {
 			var name = results.name,
 				coord = results.coord, //Location
@@ -975,10 +1179,15 @@ BotTasks = (function () {
 	};
 
 	tasks.scholar = {
+		help: {
+			invocation: '!scholar <search>',
+			example: '!scholar a scholarly journal',
+			description: 'Searches Google Scholar.'
+		},
 		baseUrl: "http://ecology-service.cse.tamu.edu/BigSemanticsService/metadata.json?url=https%3A%2F%2Fscholar.google.com%2Fscholar%3Fq%3D",
 		run: function (bot, args) {
-			var query = internal.args.concat(args, "%20"),
-				request = this.baseUrl + query,
+			var query = internal.args.concat(args) || '',
+				request = this.baseUrl + BotUtilities.sanitizeUrlParameter(query),
 				json = UrlFetchApp.fetch(request),
 				response = JSON.parse(json),
 				results,
@@ -1007,16 +1216,15 @@ BotTasks = (function () {
 				bot.sendError('Scholar', 'Error while searching.');
 			}
 
-			/*
-						for (var i = 0; i < results.google_scholar_search.search_results.length; i++) {
-							paperNames += results.google_scholar_search.search_results[i].google_scholar_search_result.title;
-							paperNames += "\n";
-						}
-			*/
 		}
 	};
 
 	tasks.bing = {
+		help: {
+			invocation: '!bing <search>',
+			example: '!bing it on',
+			description: 'Searches Bing.'
+		},
 		baseUrl: 'http://ecology-service.cse.tamu.edu/BigSemanticsService/metadata.json?url=http%3A%2F%2Fwww.bing.com%2Fsearch%3Fq%3D',
 		textForResults: function (results, key, max) {
 			var text = null;
@@ -1136,17 +1344,219 @@ BotTasks = (function () {
 		}
 	};
 
-	tasks.sendText = {
-		run: function (bot, args) {
-			var text = args[0];
-			bot.sendText(text);
+	internal.search = {
+		baseUrl: 'https://www.googleapis.com/customsearch/v1',
+		SearchFactory: (function () {
+			var factory = {},
+				GoogleSearch,
+				GoogleSearchResult;
+
+			GoogleSearch = function (key, cx) {
+				this.key = key;
+				this.cx = cx;
+			};
+
+			GoogleSearch.prototype = {
+
+				search: function (query) {
+					query = BotUtilities.sanitizeUrlParameter(query || '');
+
+					var request = internal.search.baseUrl + '?key=' + this.key + '&cx=' + this.cx + '&q=' + query,
+						json;
+
+					if (this.safe) {
+						request += '&safe=' + this.safe;
+					}
+
+					if (this.limit) {
+						request += '&num=' + this.limit;
+					}
+
+					if (this.type) {
+						request += '&searchType=' + this.type;
+					}
+
+					if (this.lr) {
+						request += '&lr=' + this.lr;
+					}
+
+					json = UrlFetchApp.fetch(request);
+					return this.convertResponse(json);
+				},
+
+				convertResponseItem: function (result) {
+					return new GoogleSearchResult(result);
+				},
+
+				convertResponse: function (json) {
+					var search = this,
+						response = JSON.parse(json),
+						results = [];
+
+					if (response) {
+						response.items.forEach(function (result) {
+							results.push(search.convertResponseItem(result));
+						});
+					}
+
+					return results;
+				}
+
+			};
+
+			/**
+			GoogleSearchResult
+			
+			.getResultsData()
+			- .title
+			- .link
+			- .displayLink
+			*/
+			GoogleSearchResult = function (data) {
+				this.init(data);
+			};
+
+			GoogleSearchResult.prototype = {
+
+				init: function (data) {
+					this.data = data;
+				},
+
+				getResultsData: function () {
+					var data = {
+						title: this.data.title,
+						link: this.data.link,
+						website: this.data.displayLink
+					};
+
+					return data;
+				}
+
+			};
+
+			factory.make = function (key, cx) {
+				return new GoogleSearch(key, cx);
+			};
+
+			return factory;
+		}()),
+
+		makeSearch: function (key, cx) {
+			var search = this.SearchFactory.make(key, cx);
+			return search;
+		},
+
+		newSearch: function (keys, config) {
+			var key = keys.key,
+				cx = keys.cx,
+				search = this.makeSearch(key, cx);
+
+			if (config) {
+				search.safe = config.safeSearch;
+				search.limit = config.defaultLimit;
+				search.lr = config.lr;
+				search.type = config.type;
+			}
+
+			return search;
 		}
 	};
 
-	tasks.log = {
+	tasks.search = {
+		help: {
+			invocation: '!search <search>',
+			example: '!search google',
+			description: 'Searches Google.'
+		},
+
+		textForResults: function (searchResults) {
+			var text = null;
+
+			if (searchResults.length > 0) {
+				text = internal.args.concatElements(searchResults, function (searchResult, i) {
+					var data = searchResult.getResultsData();
+					return i + ') ' + data.title + '\nAt: ' + data.link;
+				}, '\n\n');
+			}
+
+			return text;
+		},
+
 		run: function (bot, args) {
-			var text = JSON.stringify(args);
-			botDebug.log("Logging Text: " + text);
+			var query = internal.args.concat(args),
+				keys = bot.config.keys.google.search,
+				config = bot.config.options.google.search,
+				search = internal.search.newSearch(keys, config),
+				results,
+				text;
+
+			if (query && query.length > 0) {
+				results = search.search(query);
+				text = this.textForResults(results);
+				bot.sendText(text);
+			} else {
+				bot.sendText('Invalid search query.');
+			}
+		}
+	};
+
+	tasks.image = {
+		help: {
+			invocation: '!image <search>',
+			example: '!image that is funny',
+			description: 'Searches Google Images.'
+		},
+
+		sendResults: function (bot, searchResults) {
+			var attachmentFactory = bot.messaging.attachments,
+				text = null;
+
+			if (searchResults.length > 0) {
+				searchResults.forEach(function (result) {
+					var data = result.getResultsData(),
+						message = bot.makeMessage(),
+						image = attachmentFactory.makeImage(data.link);
+
+					message.text = 'From: ' + data.website;
+					message.attachments = [image];
+					message.send();
+				});
+			}
+
+			return text;
+		},
+
+		run: function (bot, args) {
+			var query = internal.args.concat(args),
+				keys = bot.config.keys.google.search,
+				config = bot.config.options.google.image,
+				search = internal.search.newSearch(keys, config),
+				results;
+
+			if (query && query.length > 0) {
+				results = search.search(query);
+
+				if (results.length > 0) {
+					this.sendResults(bot, results);
+				} else {
+					bot.sendText('No images found.');
+				}
+			} else {
+				bot.sendText('Invalid search query.');
+			}
+		}
+
+	};
+
+	tasks.text = {
+		help: {
+			invocation: '!text <text>',
+			example: '!text Something to say.',
+			description: 'Makes the bot say what you type.'
+		},
+		run: function (bot, args) {
+			var text = internal.args.concatFrom(args);
+			bot.sendText(text);
 		}
 	};
 
@@ -1155,6 +1565,7 @@ BotTasks = (function () {
 
 /**
 Google Scripts
+scripts.google.com
 */
 
 //respond to messages sent to the group. Recieved as POST
@@ -1171,10 +1582,10 @@ function doPost(event) {
 		postData = event.postData;
 
 		if (!postData) {
-			botDebug.log("Invalid Post. Contained no data.");
+			BotDebug.log("Invalid Post. Contained no data.");
 			throw 'Invalid POST. No data was available.';
 		} else {
-			botDebug.log("Recieved Message: " + event.postData.getDataAsString());
+			BotDebug.log("Recieved Message: " + event.postData.getDataAsString());
 		}
 
 		json = postData.getDataAsString();
@@ -1182,18 +1593,6 @@ function doPost(event) {
 	} else {
 		throw 'Invalid POST. No event was available.';
 	}
-}
-
-function runDebugText() {
-	'use strict';
-
-	var text = APP_CONFIG.command.key + 'league katarina r',
-		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
-		bot = botFactory.makeBot({
-			server: true
-		});
-
-	bot.runWithText(text);
 }
 
 function runScheduledTasks() {
@@ -1207,16 +1606,15 @@ function runScheduledTasks() {
 	bot.runScheduledTasks();
 }
 
-/*
-Hello world function for testing the bot is alive.
-*/
-function gsHelloWorld() {
+//MARK: Debug
+function runDebugText() {
 	'use strict';
 
-	var botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
-		bot = botFactory.makeBot();
+	var text = APP_CONFIG.command.key + 'search katarina',
+		botFactory = new BotFactory(APP_CONFIG, BOT_CONFIG, BotTasks),
+		bot = botFactory.makeBot({
+			server: true
+		});
 
-	bot.runTask('helloWorld');
+	bot.runWithText(text);
 }
-
-//TODO: Add function call for google scripts for running scheduled tasks.

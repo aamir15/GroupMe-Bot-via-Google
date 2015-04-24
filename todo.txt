@@ -1,8 +1,13 @@
-=== BotScheduler Should Run
-- Need to complete the function to determine whether or not the task should be run.
--- Line 475
--- isTimeToRun
+=== Bot Functionality
+- Enhance Arguments Parsing
+-- Args can be keyed (-key argument)
+-- Argument maps are optional. Raw arguments would be passed otherwise.
+-- Args maps can require a certain key be specified
+- Reflections
+- Schedule for certain times during the day/week/month.
+
 === API Implementations
 - Add additional API tasks.
-- API Keys go into BOT_CONFIG.keys
--- line 45
+
+=== API Ideas
+- Youtube Comments
