@@ -1,3 +1,7 @@
+		---- CLONED FROM https://github.com/william-reed/GroupMe-Bots-With-Google-Apps-Script ----
+
+
+
 # GroupMe-Bot
 
 ##Overview
